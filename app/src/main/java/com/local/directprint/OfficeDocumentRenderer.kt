@@ -112,7 +112,7 @@ object OfficeDocumentRenderer {
         } ?: ""
         val rows = text.split("\r?\n".toRegex())
             .filter { it.isNotBlank() }
-            .map { line -> line.split(",").map { it.trim().removeSurrounding(""") } }
+            .map { line -> line.split(",").map { it.trim().removeSurrounding("\"") } }
         writeTableToPdf("CSV", rows, outFile)
     }
 
