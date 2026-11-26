@@ -208,8 +208,8 @@ object OfficeDocumentRenderer {
     private fun renderPptxToPdf(context: Context, uri: Uri, outFile: File) {
         val entries = readZipEntries(context, uri)
         val slideKeys = entries.keys
-            .filter { it.matches(Regex("ppt/slides/slide\d+\.xml")) }
-            .sortedBy { Regex("\d+").find(it)?.value?.toIntOrNull() ?: 0 }
+            .filter { it.matches(Regex("ppt/slides/slide\\d+\\.xml")) }
+            .sortedBy { Regex("\\d+").find(it)?.value?.toIntOrNull() ?: 0 }
 
         if (slideKeys.isEmpty()) throw IllegalStateException("Slide PowerPoint tidak ditemukan.")
 
