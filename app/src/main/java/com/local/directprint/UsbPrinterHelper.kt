@@ -171,20 +171,8 @@ object UsbPrinterHelper {
         ipp.write(docBytes)
 
         val ippBody = ipp.toByteArray()
-        val httpHeader = buildString {
-            append("POST /ipp/print HTTP/1.1
-")
-            append("Host: localhost
-")
-            append("Content-Type: application/ipp
-")
-            append("Content-Length: ${ippBody.size}
-")
-            append("Connection: close
-")
-            append("
-")
-        }.toByteArray(StandardCharsets.US_ASCII)
+        val crlf = "\r\n"
+        val httpHeader = ("POST /ipp/print HTTP/1.1" + crlf + "Host: localhost" + crlf + "Content-Type: application/ipp" + crlf + "Content-Length: " + ippBody.size + crlf + "Connection: close" + crlf + crlf).toByteArray(StandardCharsets.US_ASCII)
 
         val packet = ByteArrayOutputStream(httpHeader.size + ippBody.size)
         packet.write(httpHeader)
