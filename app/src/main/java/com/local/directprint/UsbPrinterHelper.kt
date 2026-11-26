@@ -18,28 +18,23 @@ data class PrinterEndpointInfo(
 
 object UsbPrinterHelper {
 
-    private const val CANON_VENDOR_ID = 0x04A9 // 1193
+    private const val CANON_VENDOR_ID = 0x04A9
 
     fun findPrinters(usbManager: UsbManager): List<UsbDevice> {
-        return usbManager.deviceList.values.filter { device ->
-            isPrinterDevice(device)
-        }
+        return usbManager.deviceList.values.filter { isPrinterDevice(it) }
     }
 
     fun isPrinterDevice(device: UsbDevice): Boolean {
         if (device.deviceClass == UsbConstants.USB_CLASS_PRINTER) return true
         if (device.vendorId == CANON_VENDOR_ID) return true
         for (i in 0 until device.interfaceCount) {
-            if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_PRINTER) {
-                return true
-            }
+            if (device.getInterface(i).interfaceClass == UsbConstants.USB_CLASS_PRINTER) return true
         }
         return false
     }
 
     fun inspectDevice(device: UsbDevice): PrinterEndpointInfo? {
         var fallback: PrinterEndpointInfo? = null
-
         for (i in 0 until device.interfaceCount) {
             val intf = device.getInterface(i)
             val isPrinterClass = intf.interfaceClass == UsbConstants.USB_CLASS_PRINTER
@@ -50,11 +45,8 @@ object UsbPrinterHelper {
             for (e in 0 until intf.endpointCount) {
                 val ep = intf.getEndpoint(e)
                 if (ep.type == UsbConstants.USB_ENDPOINT_XFER_BULK) {
-                    if (ep.direction == UsbConstants.USB_DIR_OUT && outEp == null) {
-                        outEp = ep
-                    } else if (ep.direction == UsbConstants.USB_DIR_IN && inEp == null) {
-                        inEp = ep
-                    }
+                    if (ep.direction == UsbConstants.USB_DIR_OUT && outEp == null) outEp = ep
+                    else if (ep.direction == UsbConstants.USB_DIR_IN && inEp == null) inEp = ep
                 }
             }
 
@@ -63,7 +55,7 @@ object UsbPrinterHelper {
                         && intf.interfaceSubclass == 1
                         && intf.interfaceProtocol == 4)
                 val info = PrinterEndpointInfo(device, intf, outEp, inEp, isIpp)
-                if (isIpp) return info // Prefer IPP-over-USB when available
+                if (isIpp) return info
                 if (fallback == null) fallback = info
             }
         }
@@ -100,7 +92,7 @@ object UsbPrinterHelper {
                 onProgress("Menyusun paket IPP-over-USB ($mimeType)...")
                 buildHttpIppPrintJob(documentBytes, mimeType, jobName)
             } else {
-                onProgress("Mengirim data cetak langsung ke USB Bulk OUT...")
+                onProgress("Mengirim data ke USB Raw Bulk OUT...")
                 documentBytes
             }
 
@@ -125,37 +117,26 @@ object UsbPrinterHelper {
                 if (read > 0) {
                     val header = String(respBuf, 0, minOf(read, 200), StandardCharsets.UTF_8)
                     val firstLine = header.lineSequence().firstOrNull()?.trim().orEmpty()
-                    if (firstLine.isNotEmpty()) {
-                        responseSummary = "Printer merespons: $firstLine"
-                    }
+                    if (firstLine.isNotEmpty()) responseSummary = "Printer merespons: $firstLine"
                 }
             } else if (!info.isIppOverUsb) {
-                responseSummary = "Terkirim ke USB Raw (${payload.size / 1024} KB). Jika printer Canon klasik tidak merespons, gunakan tombol Layanan Cetak Android."
+                responseSummary = "Terkirim ke USB Raw (${payload.size / 1024} KB). Catatan: Printer host-based seperti Canon G2010 tidak membaca PDF mentah lewat USB Raw — gunakan tombol Cetak via Layanan Cetak Android."
             }
 
             Result.success(responseSummary)
         } catch (e: Exception) {
             Result.failure(e)
         } finally {
-            try {
-                connection.releaseInterface(info.usbInterface)
-            } catch (_: Exception) {
-            }
+            try { connection.releaseInterface(info.usbInterface) } catch (_: Exception) {}
             connection.close()
         }
     }
 
     private fun buildHttpIppPrintJob(docBytes: ByteArray, mimeType: String, jobName: String): ByteArray {
         val ipp = ByteArrayOutputStream()
-        // IPP 2.0 header
-        ipp.write(0x02)
-        ipp.write(0x00)
-        // Operation: Print-Job (0x0002)
-        ipp.write(0x00)
-        ipp.write(0x02)
-        // Request ID: 1
+        ipp.write(0x02); ipp.write(0x00)
+        ipp.write(0x00); ipp.write(0x02)
         ipp.write(byteArrayOf(0x00, 0x00, 0x00, 0x01))
-        // Operation attributes tag
         ipp.write(0x01)
 
         writeIppAttr(ipp, 0x47, "attributes-charset", "utf-8")
@@ -164,15 +145,19 @@ object UsbPrinterHelper {
         writeIppAttr(ipp, 0x42, "requesting-user-name", "android")
         writeIppAttr(ipp, 0x42, "job-name", jobName.take(64).ifEmpty { "DirectPrint" })
         writeIppAttr(ipp, 0x49, "document-format", mimeType)
-
-        // End of attributes tag
         ipp.write(0x03)
-        // Document payload
         ipp.write(docBytes)
 
         val ippBody = ipp.toByteArray()
-        val crlf = "\r\n"
-        val httpHeader = ("POST /ipp/print HTTP/1.1" + crlf + "Host: localhost" + crlf + "Content-Type: application/ipp" + crlf + "Content-Length: " + ippBody.size + crlf + "Connection: close" + crlf + crlf).toByteArray(StandardCharsets.US_ASCII)
+        val crlf = "
+"
+        val httpHeader = (
+            "POST /ipp/print HTTP/1.1" + crlf +
+            "Host: localhost" + crlf +
+            "Content-Type: application/ipp" + crlf +
+            "Content-Length: " + ippBody.size + crlf +
+            "Connection: close" + crlf + crlf
+        ).toByteArray(StandardCharsets.US_ASCII)
 
         val packet = ByteArrayOutputStream(httpHeader.size + ippBody.size)
         packet.write(httpHeader)

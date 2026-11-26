@@ -26,8 +26,8 @@ class DirectPrintAdapter(
     private val jobName: String,
     private val isPdf: Boolean,
     private val uris: List<Uri>,
-    private val selectedPages: List<Int>, // 1-indexed
-    private val monochrome: Boolean
+    private val selectedPages: List<Int>,
+    private val colorFilterMode: Int // 0=Color, 1=Monochrome, 2=Scan High-Contrast
 ) : PrintDocumentAdapter() {
 
     private var currentAttributes: PrintAttributes? = null
@@ -45,13 +45,9 @@ class DirectPrintAdapter(
             return
         }
 
-        val pageCount = selectedPages.size.coerceAtLeast(1)
         val info = PrintDocumentInfo.Builder(jobName)
-            .setContentType(
-                if (isPdf) PrintDocumentInfo.CONTENT_TYPE_DOCUMENT
-                else PrintDocumentInfo.CONTENT_TYPE_PHOTO
-            )
-            .setPageCount(pageCount)
+            .setContentType(if (isPdf) PrintDocumentInfo.CONTENT_TYPE_DOCUMENT else PrintDocumentInfo.CONTENT_TYPE_PHOTO)
+            .setPageCount(selectedPages.size.coerceAtLeast(1))
             .build()
 
         callback.onLayoutFinished(info, true)
@@ -69,11 +65,7 @@ class DirectPrintAdapter(
             .build()
 
         val pdfDoc = PrintedPdfDocument(context, attrs)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        if (monochrome) {
-            val cm = ColorMatrix().apply { setSaturation(0f) }
-            paint.colorFilter = ColorMatrixColorFilter(cm)
-        }
+        val paint = buildFilterPaint(colorFilterMode)
 
         try {
             if (isPdf && uris.isNotEmpty()) {
@@ -92,9 +84,8 @@ class DirectPrintAdapter(
                             canvas.drawColor(Color.WHITE)
 
                             renderer.openPage(idx0).use { srcPage ->
-                                val scale = 2.0f
-                                val bmpW = (srcPage.width * scale).toInt().coerceIn(200, 2200)
-                                val bmpH = (srcPage.height * scale).toInt().coerceIn(200, 3100)
+                                val bmpW = (srcPage.width * 2).coerceIn(200, 2200)
+                                val bmpH = (srcPage.height * 2).coerceIn(200, 3100)
                                 val bitmap = Bitmap.createBitmap(bmpW, bmpH, Bitmap.Config.ARGB_8888)
                                 bitmap.eraseColor(Color.WHITE)
                                 srcPage.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
@@ -125,14 +116,41 @@ class DirectPrintAdapter(
                 }
             }
 
-            FileOutputStream(destination.fileDescriptor).use { out ->
-                pdfDoc.writeTo(out)
-            }
+            FileOutputStream(destination.fileDescriptor).use { pdfDoc.writeTo(it) }
             callback.onWriteFinished(arrayOf(PageRange.ALL_PAGES))
         } catch (e: Exception) {
             callback.onWriteFailed(e.message ?: "Gagal menyusun halaman cetak.")
         } finally {
             pdfDoc.close()
+        }
+    }
+
+    companion object {
+        fun buildFilterPaint(mode: Int): Paint {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            when (mode) {
+                1 -> {
+                    val cm = ColorMatrix().apply { setSaturation(0f) }
+                    paint.colorFilter = ColorMatrixColorFilter(cm)
+                }
+                2 -> {
+                    // Scan mode: grayscale + contrast boost for crisp white paper
+                    val contrast = 1.65f
+                    val translate = (-0.5f * contrast + 0.5f) * 255f + 22f
+                    val cm = ColorMatrix().apply { setSaturation(0f) }
+                    val contrastMatrix = ColorMatrix(
+                        floatArrayOf(
+                            contrast, 0f, 0f, 0f, translate,
+                            0f, contrast, 0f, 0f, translate,
+                            0f, 0f, contrast, 0f, translate,
+                            0f, 0f, 0f, 1f, 0f
+                        )
+                    )
+                    cm.postConcat(contrastMatrix)
+                    paint.colorFilter = ColorMatrixColorFilter(cm)
+                }
+            }
+            return paint
         }
     }
 
@@ -150,19 +168,13 @@ class DirectPrintAdapter(
 
     private fun decodeScaledBitmap(uri: Uri, maxDim: Int): Bitmap? {
         val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, opts)
-        }
+        context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
         var sampleSize = 1
-        while (opts.outWidth / sampleSize > maxDim || opts.outHeight / sampleSize > maxDim) {
-            sampleSize *= 2
-        }
+        while (opts.outWidth / sampleSize > maxDim || opts.outHeight / sampleSize > maxDim) sampleSize *= 2
         val decodeOpts = BitmapFactory.Options().apply {
             inSampleSize = sampleSize
             inPreferredConfig = Bitmap.Config.ARGB_8888
         }
-        return context.contentResolver.openInputStream(uri)?.use {
-            BitmapFactory.decodeStream(it, null, decodeOpts)
-        }
+        return context.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, decodeOpts) }
     }
 }

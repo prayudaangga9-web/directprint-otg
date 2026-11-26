@@ -1,7 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- USB Printer Class (Class 7) - includes Canon, Epson, HP, Brother -->
     <usb-device class="7" />
-    <!-- Canon Vendor ID (0x04A9 = 1193) fallback -->
     <usb-device vendor-id="1193" />
 </resources>

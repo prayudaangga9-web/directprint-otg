@@ -48,7 +48,7 @@
                     android:id="@+id/btnScanUsb"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="wrap_content"
-                    android:layout_height="36dp"
+                    android:layout_height="34dp"
                     android:insetTop="0dp"
                     android:insetBottom="0dp"
                     android:minWidth="0dp"
@@ -66,12 +66,12 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Colokkan kabel OTG ke printer Canon, lalu ketuk Cek OTG."
+                android:text="Colokkan kabel OTG ke printer, lalu ketuk Cek OTG."
                 android:textColor="@color/text_secondary"
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <!-- File Picker Card -->
+        <!-- File Picker Card (PDF, Office/TXT, Images) -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -83,18 +83,20 @@
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal">
+                android:orientation="horizontal"
+                android:layout_marginBottom="8dp">
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/btnPickPdf"
+                    android:id="@+id/btnPickDoc"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="0dp"
-                    android:layout_height="46dp"
+                    android:layout_height="44dp"
                     android:layout_weight="1"
                     android:layout_marginEnd="6dp"
-                    android:text="Pilih PDF"
+                    android:text="PDF / Office / TXT"
                     android:textAllCaps="false"
                     android:textColor="@color/text_primary"
+                    android:textSize="12.5sp"
                     app:cornerRadius="8dp"
                     app:strokeColor="@color/border" />
 
@@ -102,12 +104,13 @@
                     android:id="@+id/btnPickImages"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
                     android:layout_width="0dp"
-                    android:layout_height="46dp"
+                    android:layout_height="44dp"
                     android:layout_weight="1"
                     android:layout_marginStart="6dp"
-                    android:text="Pilih Foto / JPG"
+                    android:text="Foto / Gambar"
                     android:textAllCaps="false"
                     android:textColor="@color/text_primary"
+                    android:textSize="12.5sp"
                     app:cornerRadius="8dp"
                     app:strokeColor="@color/border" />
             </LinearLayout>
@@ -116,10 +119,9 @@
                 android:id="@+id/tvFileInfo"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
-                android:text="Belum ada dokumen dipilih"
+                android:text="Mendukung PDF, Word (.docx), Excel (.xlsx), PowerPoint (.pptx), CSV, TXT, JPG/PNG"
                 android:textColor="@color/text_secondary"
-                android:textSize="12.5sp" />
+                android:textSize="12sp" />
 
             <!-- Document / Image Preview -->
             <FrameLayout
@@ -199,13 +201,13 @@
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Pengaturan Cetak"
+                android:text="Pengaturan Cetak &amp; Konversi"
                 android:textColor="@color/text_primary"
                 android:textSize="13.5sp"
                 android:textStyle="bold"
                 android:layout_marginBottom="10dp" />
 
-            <!-- Paper & Color Row -->
+            <!-- Row 1: Paper & Color/Filter -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -246,7 +248,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="Warna"
+                        android:text="Warna / Filter"
                         android:textColor="@color/text_secondary"
                         android:textSize="11.5sp"
                         android:layout_marginBottom="4dp" />
@@ -261,7 +263,7 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- Orientation & Page Range Row -->
+            <!-- Row 2: Orientation & Page Range -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
@@ -322,35 +324,58 @@
             </LinearLayout>
         </LinearLayout>
 
-        <!-- Primary Print Buttons -->
+        <!-- Action Buttons -->
         <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPrintUsbDirect"
+            android:id="@+id/btnPrintAndroidService"
             android:layout_width="match_parent"
             android:layout_height="48dp"
             android:layout_marginBottom="8dp"
             android:backgroundTint="@color/accent"
             android:enabled="false"
-            android:text="Cetak Langsung USB OTG"
+            android:text="Cetak via Layanan Cetak Android / Canon"
             android:textAllCaps="false"
             android:textColor="@color/accent_text"
             android:textSize="14sp"
             android:textStyle="bold"
             app:cornerRadius="8dp" />
 
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btnPrintAndroidService"
-            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+        <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="46dp"
-            android:enabled="false"
-            android:text="Cetak via Layanan Cetak Android / Canon"
-            android:textAllCaps="false"
-            android:textColor="@color/text_primary"
-            android:textSize="13.5sp"
-            app:cornerRadius="8dp"
-            app:strokeColor="@color/border" />
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
 
-        <!-- Status / Progress Log -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPrintUsbDirect"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginEnd="6dp"
+                android:enabled="false"
+                android:text="Cetak USB Direct"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="12.5sp"
+                app:cornerRadius="8dp"
+                app:strokeColor="@color/border" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnSaveAsPdf"
+                style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+                android:layout_width="0dp"
+                android:layout_height="44dp"
+                android:layout_weight="1"
+                android:layout_marginStart="6dp"
+                android:enabled="false"
+                android:text="Simpan sebagai PDF"
+                android:textAllCaps="false"
+                android:textColor="@color/text_primary"
+                android:textSize="12.5sp"
+                app:cornerRadius="8dp"
+                app:strokeColor="@color/border" />
+        </LinearLayout>
+
+        <!-- Status Log -->
         <TextView
             android:id="@+id/tvLog"
             android:layout_width="match_parent"

@@ -9,9 +9,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.ColorMatrix
-import android.graphics.ColorMatrixColorFilter
 import android.graphics.Paint
+import android.graphics.RectF
 import android.graphics.drawable.GradientDrawable
 import android.graphics.pdf.PdfDocument
 import android.graphics.pdf.PdfRenderer
@@ -59,7 +58,7 @@ class MainActivity : AppCompatActivity() {
     private var isPdfMode = false
     private var selectedUris: List<Uri> = emptyList()
     private var totalPages = 0
-    private var currentPreviewPage = 0 // 0-indexed
+    private var currentPreviewPage = 0
     private var displayName = "Dokumen"
 
     // Views
@@ -67,7 +66,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvUsbTitle: TextView
     private lateinit var tvUsbDetail: TextView
     private lateinit var btnScanUsb: MaterialButton
-    private lateinit var btnPickPdf: MaterialButton
+    private lateinit var btnPickDoc: MaterialButton
     private lateinit var btnPickImages: MaterialButton
     private lateinit var tvFileInfo: TextView
     private lateinit var previewContainer: FrameLayout
@@ -80,19 +79,19 @@ class MainActivity : AppCompatActivity() {
     private lateinit var spColorMode: Spinner
     private lateinit var spOrientation: Spinner
     private lateinit var etPageRange: EditText
-    private lateinit var btnPrintUsbDirect: MaterialButton
     private lateinit var btnPrintAndroidService: MaterialButton
+    private lateinit var btnPrintUsbDirect: MaterialButton
+    private lateinit var btnSaveAsPdf: MaterialButton
     private lateinit var tvLog: TextView
 
-    private val pickPdfLauncher = registerForActivityResult(
+    private val pickDocLauncher = registerForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
             try {
                 contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (_: Exception) {
-            }
-            loadPdfDocument(uri)
+            } catch (_: Exception) {}
+            handlePickedDocument(uri)
         }
     }
 
@@ -103,10 +102,17 @@ class MainActivity : AppCompatActivity() {
             uris.forEach {
                 try {
                     contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                } catch (_: Exception) {
-                }
+                } catch (_: Exception) {}
             }
             loadImageDocuments(uris)
+        }
+    }
+
+    private val savePdfLauncher = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/pdf")
+    ) { outUri ->
+        if (outUri != null) {
+            exportCurrentToPdfUri(outUri)
         }
     }
 
@@ -124,7 +130,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     } else {
                         pendingUsbPrintAfterPermission = false
-                        setLog("Izin USB ditolak. Ketuk Izinkan saat pop-up USB muncul.")
+                        setLog("Izin USB ditolak. Ketuk Izinkan saat pop-up muncul.")
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
@@ -160,10 +166,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        try {
-            unregisterReceiver(usbReceiver)
-        } catch (_: Exception) {
-        }
+        try { unregisterReceiver(usbReceiver) } catch (_: Exception) {}
         uiScope.cancel()
     }
 
@@ -172,7 +175,7 @@ class MainActivity : AppCompatActivity() {
         tvUsbTitle = findViewById(R.id.tvUsbTitle)
         tvUsbDetail = findViewById(R.id.tvUsbDetail)
         btnScanUsb = findViewById(R.id.btnScanUsb)
-        btnPickPdf = findViewById(R.id.btnPickPdf)
+        btnPickDoc = findViewById(R.id.btnPickDoc)
         btnPickImages = findViewById(R.id.btnPickImages)
         tvFileInfo = findViewById(R.id.tvFileInfo)
         previewContainer = findViewById(R.id.previewContainer)
@@ -185,14 +188,15 @@ class MainActivity : AppCompatActivity() {
         spColorMode = findViewById(R.id.spColorMode)
         spOrientation = findViewById(R.id.spOrientation)
         etPageRange = findViewById(R.id.etPageRange)
-        btnPrintUsbDirect = findViewById(R.id.btnPrintUsbDirect)
         btnPrintAndroidService = findViewById(R.id.btnPrintAndroidService)
+        btnPrintUsbDirect = findViewById(R.id.btnPrintUsbDirect)
+        btnSaveAsPdf = findViewById(R.id.btnSaveAsPdf)
         tvLog = findViewById(R.id.tvLog)
     }
 
     private fun setupSpinners() {
         val papers = listOf("A4 (210 × 297 mm)", "F4 / Folio (215 × 330 mm)", "Letter", "4R Foto (10 × 15 cm)")
-        val colors = listOf("Berwarna", "Hitam Putih (Monokrom)")
+        val colors = listOf("Berwarna (Asli)", "Hitam Putih (Monokrom)", "Mode Scan (Kertas Putih Tajam)")
         val orientations = listOf("Portrait (Tegak)", "Landscape (Mendatar)")
 
         spPaperSize.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_dropdown_item, papers)
@@ -201,12 +205,20 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupListeners() {
-        btnScanUsb.setOnClickListener {
-            scanUsbPrinters(requestPermissionIfNeeded = true)
-        }
+        btnScanUsb.setOnClickListener { scanUsbPrinters(requestPermissionIfNeeded = true) }
 
-        btnPickPdf.setOnClickListener {
-            pickPdfLauncher.launch(arrayOf("application/pdf"))
+        btnPickDoc.setOnClickListener {
+            pickDocLauncher.launch(
+                arrayOf(
+                    "application/pdf",
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    "text/plain",
+                    "text/csv",
+                    "text/comma-separated-values"
+                )
+            )
         }
 
         btnPickImages.setOnClickListener {
@@ -227,10 +239,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        btnPrintAndroidService.setOnClickListener { startAndroidSystemPrint() }
+
         btnPrintUsbDirect.setOnClickListener {
             val info = activePrinterInfo
             if (info == null) {
-                Toast.makeText(this, "Colokkan printer lewat OTG terlebih dahulu", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, "Colokkan printer lewat OTG dulu", Toast.LENGTH_SHORT).show()
                 scanUsbPrinters(requestPermissionIfNeeded = true)
                 return@setOnClickListener
             }
@@ -242,8 +256,9 @@ class MainActivity : AppCompatActivity() {
             startDirectUsbPrint()
         }
 
-        btnPrintAndroidService.setOnClickListener {
-            startAndroidSystemPrint()
+        btnSaveAsPdf.setOnClickListener {
+            val base = displayName.substringBeforeLast('.').ifBlank { "dokumen" }
+            savePdfLauncher.launch("${base}_cetak.pdf")
         }
     }
 
@@ -253,12 +268,7 @@ class MainActivity : AppCompatActivity() {
             addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
             addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         }
-        ContextCompat.registerReceiver(
-            this,
-            usbReceiver,
-            filter,
-            ContextCompat.RECEIVER_EXPORTED
-        )
+        ContextCompat.registerReceiver(this, usbReceiver, filter, ContextCompat.RECEIVER_EXPORTED)
     }
 
     private fun getUsbDeviceExtra(intent: Intent): UsbDevice? {
@@ -282,13 +292,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun scanUsbPrinters(requestPermissionIfNeeded: Boolean = false) {
-        val printers = UsbPrinterHelper.findPrinters(usbManager)
-        val first = printers.firstOrNull()
-
+        val first = UsbPrinterHelper.findPrinters(usbManager).firstOrNull()
         if (first == null) {
             activePrinterInfo = null
             tvUsbTitle.text = "Printer USB OTG belum terdeteksi"
-            tvUsbDetail.text = "Colokkan kabel OTG ke printer Canon, pastikan printer menyala."
+            tvUsbDetail.text = "Colokkan kabel OTG ke printer, pastikan printer menyala."
             setDotColor(ContextCompat.getColor(this, R.color.status_idle))
             updatePrintButtons()
             return
@@ -301,30 +309,21 @@ class MainActivity : AppCompatActivity() {
         val protoLabel = when {
             info == null -> "Endpoint cetak tidak ditemukan"
             info.isIppOverUsb -> "Mode IPP-over-USB siap (Cetak langsung didukung)"
-            else -> "Mode USB Printer standar terdeteksi"
+            else -> "Mode USB Raw (untuk Canon G2010/klasik gunakan Layanan Cetak Android)"
         }
 
         val hasPerm = usbManager.hasPermission(first)
-        tvUsbDetail.text = if (hasPerm) {
-            "$protoLabel • Izin USB aktif"
-        } else {
-            "$protoLabel • Ketuk Cek OTG untuk memberi izin USB"
-        }
+        tvUsbDetail.text = if (hasPerm) "$protoLabel • Izin USB aktif"
+        else "$protoLabel • Ketuk Cek OTG untuk memberi izin USB"
 
         setDotColor(ContextCompat.getColor(this, R.color.teal))
-        if (!hasPerm && requestPermissionIfNeeded) {
-            requestUsbPermission(first)
-        }
+        if (!hasPerm && requestPermissionIfNeeded) requestUsbPermission(first)
         updatePrintButtons()
     }
 
     private fun setDotColor(colorInt: Int) {
         val bg = usbStatusDot.background
-        if (bg is GradientDrawable) {
-            bg.setColor(colorInt)
-        } else {
-            usbStatusDot.setBackgroundColor(colorInt)
-        }
+        if (bg is GradientDrawable) bg.setColor(colorInt) else usbStatusDot.setBackgroundColor(colorInt)
     }
 
     private fun handleIncomingIntent(intent: Intent?) {
@@ -333,8 +332,8 @@ class MainActivity : AppCompatActivity() {
             Intent.ACTION_SEND -> {
                 val uri = getStreamUriExtra(intent) ?: return
                 val type = intent.type.orEmpty()
-                if (type.contains("pdf")) loadPdfDocument(uri)
-                else if (type.startsWith("image/")) loadImageDocuments(listOf(uri))
+                if (type.startsWith("image/")) loadImageDocuments(listOf(uri))
+                else handlePickedDocument(uri)
             }
             Intent.ACTION_SEND_MULTIPLE -> {
                 val uris = getStreamUriListExtra(intent)
@@ -342,7 +341,7 @@ class MainActivity : AppCompatActivity() {
             }
             Intent.ACTION_VIEW -> {
                 val uri = intent.data ?: return
-                loadPdfDocument(uri)
+                handlePickedDocument(uri)
             }
         }
     }
@@ -375,11 +374,40 @@ class MainActivity : AppCompatActivity() {
         return uri.lastPathSegment ?: "Dokumen"
     }
 
-    private fun loadPdfDocument(uri: Uri) {
+    private fun handlePickedDocument(uri: Uri) {
+        val name = queryFileName(uri)
+        val mime = contentResolver.getType(uri).orEmpty()
+        if (name.lowercase().endsWith(".pdf") || mime == "application/pdf") {
+            loadPdfDocument(uri, name)
+            return
+        }
+
+        // Convert Office (.docx, .xlsx, .pptx) / CSV / TXT into cached PDF automatically
+        setLog("Merender $name ke halaman siap cetak...")
+        tvFileInfo.text = "Memproses $name..."
+        uiScope.launch {
+            val renderedFile = withContext(Dispatchers.IO) {
+                try {
+                    OfficeDocumentRenderer.renderToTempPdf(this@MainActivity, uri, name)
+                } catch (e: Exception) {
+                    runOnUiThread { setLog("Gagal membaca $name: ${e.message}") }
+                    null
+                }
+            }
+            if (renderedFile != null && renderedFile.exists()) {
+                setLog("Berhasil merender $name.")
+                loadPdfDocument(Uri.fromFile(renderedFile), name)
+            } else {
+                Toast.makeText(this@MainActivity, "Format file tidak didukung atau rusak", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    private fun loadPdfDocument(uri: Uri, nameOverride: String? = null) {
         isPdfMode = true
         selectedUris = listOf(uri)
         currentPreviewPage = 0
-        displayName = queryFileName(uri)
+        displayName = nameOverride ?: queryFileName(uri)
         etPageRange.setText("")
 
         uiScope.launch {
@@ -388,16 +416,14 @@ class MainActivity : AppCompatActivity() {
                     contentResolver.openFileDescriptor(uri, "r")?.use { pfd ->
                         PdfRenderer(pfd).use { it.pageCount }
                     } ?: 0
-                } catch (_: Exception) {
-                    0
-                }
+                } catch (_: Exception) { 0 }
             }
             if (count <= 0) {
-                Toast.makeText(this@MainActivity, "Gagal membaca PDF", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Gagal membaca dokumen", Toast.LENGTH_SHORT).show()
                 return@launch
             }
             totalPages = count
-            tvFileInfo.text = "$displayName • $totalPages halaman PDF"
+            tvFileInfo.text = "$displayName • $totalPages halaman siap cetak"
             previewContainer.visibility = View.VISIBLE
             previewNavBar.visibility = if (totalPages > 1) View.VISIBLE else View.GONE
             renderCurrentPreview()
@@ -413,11 +439,7 @@ class MainActivity : AppCompatActivity() {
         displayName = if (uris.size == 1) queryFileName(uris[0]) else "${uris.size}_gambar"
         etPageRange.setText("")
 
-        tvFileInfo.text = if (uris.size == 1) {
-            "$displayName • 1 gambar"
-        } else {
-            "${uris.size} gambar dipilih"
-        }
+        tvFileInfo.text = if (uris.size == 1) "$displayName • 1 gambar" else "${uris.size} gambar dipilih"
         previewContainer.visibility = View.VISIBLE
         previewNavBar.visibility = if (totalPages > 1) View.VISIBLE else View.GONE
         renderCurrentPreview()
@@ -454,22 +476,20 @@ class MainActivity : AppCompatActivity() {
                         contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
                         var sample = 1
                         while (opts.outWidth / sample > 1200 || opts.outHeight / sample > 1200) sample *= 2
-                        val dOpts = BitmapFactory.Options().apply { inSampleSize = sample }
-                        contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, dOpts) }
+                        contentResolver.openInputStream(uri)?.use {
+                            BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+                        }
                     }
-                } catch (_: Exception) {
-                    null
-                }
+                } catch (_: Exception) { null }
             }
-            if (bmp != null) {
-                ivPreview.setImageBitmap(bmp)
-            }
+            if (bmp != null) ivPreview.setImageBitmap(bmp)
         }
     }
 
     private fun updatePrintButtons() {
         val hasDoc = selectedUris.isNotEmpty() && totalPages > 0
         btnPrintAndroidService.isEnabled = hasDoc
+        btnSaveAsPdf.isEnabled = hasDoc
         btnPrintUsbDirect.isEnabled = hasDoc && activePrinterInfo != null
     }
 
@@ -485,9 +505,7 @@ class MainActivity : AppCompatActivity() {
                 val a = bounds.getOrNull(0)?.trim()?.toIntOrNull()
                 val b = bounds.getOrNull(1)?.trim()?.toIntOrNull()
                 if (a != null && b != null) {
-                    val start = minOf(a, b).coerceAtLeast(1)
-                    val end = maxOf(a, b).coerceAtMost(maxPage)
-                    for (i in start..end) set.add(i)
+                    for (i in minOf(a, b).coerceAtLeast(1)..maxOf(a, b).coerceAtMost(maxPage)) set.add(i)
                 }
             } else {
                 val n = p.toIntOrNull()
@@ -500,11 +518,11 @@ class MainActivity : AppCompatActivity() {
     private fun startAndroidSystemPrint() {
         if (selectedUris.isEmpty()) return
         val pages = parsePageRange(etPageRange.text.toString(), totalPages)
-        val monochrome = spColorMode.selectedItemPosition == 1
+        val colorModeIdx = spColorMode.selectedItemPosition
         val isLandscape = spOrientation.selectedItemPosition == 1
 
         val baseMedia = when (spPaperSize.selectedItemPosition) {
-            1 -> PrintAttributes.MediaSize("ISO_F4", "F4 / Folio", 8464, 12992) // 215x330mm in mils
+            1 -> PrintAttributes.MediaSize("ISO_F4", "F4 / Folio", 8464, 12992)
             2 -> PrintAttributes.MediaSize.NA_LETTER
             3 -> PrintAttributes.MediaSize("PHOTO_4R", "4R Foto", 4000, 6000)
             else -> PrintAttributes.MediaSize.ISO_A4
@@ -513,46 +531,54 @@ class MainActivity : AppCompatActivity() {
 
         val attrs = PrintAttributes.Builder()
             .setMediaSize(mediaSize)
-            .setColorMode(
-                if (monochrome) PrintAttributes.COLOR_MODE_MONOCHROME
-                else PrintAttributes.COLOR_MODE_COLOR
-            )
+            .setColorMode(if (colorModeIdx > 0) PrintAttributes.COLOR_MODE_MONOCHROME else PrintAttributes.COLOR_MODE_COLOR)
             .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
             .build()
 
         val printManager = getSystemService(Context.PRINT_SERVICE) as PrintManager
-        val adapter = DirectPrintAdapter(
-            context = this,
-            jobName = displayName,
-            isPdf = isPdfMode,
-            uris = selectedUris,
-            selectedPages = pages,
-            monochrome = monochrome
-        )
+        val adapter = DirectPrintAdapter(this, displayName, isPdfMode, selectedUris, pages, colorModeIdx)
         printManager.print(displayName, adapter, attrs)
-        setLog("Dialog cetak sistem dibuka (${pages.size} halaman).")
+        setLog("Dialog cetak Android dibuka (${pages.size} halaman).")
+    }
+
+    private fun exportCurrentToPdfUri(outUri: Uri) {
+        val pages = parsePageRange(etPageRange.text.toString(), totalPages)
+        val colorModeIdx = spColorMode.selectedItemPosition
+        val isLandscape = spOrientation.selectedItemPosition == 1
+        setLog("Menyimpan file PDF...")
+
+        uiScope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val (bytes, _) = buildPrintReadyPdf(pages, colorModeIdx, isLandscape)
+                    contentResolver.openOutputStream(outUri)?.use { it.write(bytes) }
+                    true
+                } catch (e: Exception) {
+                    runOnUiThread { setLog("Gagal simpan PDF: ${e.message}") }
+                    false
+                }
+            }
+            if (ok) {
+                setLog("PDF berhasil disimpan (${pages.size} halaman).")
+                Toast.makeText(this@MainActivity, "PDF tersimpan", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     private fun startDirectUsbPrint() {
         val info = activePrinterInfo ?: return
         val pages = parsePageRange(etPageRange.text.toString(), totalPages)
-        val monochrome = spColorMode.selectedItemPosition == 1
+        val colorModeIdx = spColorMode.selectedItemPosition
         val isLandscape = spOrientation.selectedItemPosition == 1
 
         btnPrintUsbDirect.isEnabled = false
-        setLog("Menyiapkan file untuk cetak USB OTG...")
+        setLog("Menyiapkan dokumen untuk USB OTG...")
 
         uiScope.launch {
             val result = withContext(Dispatchers.IO) {
                 try {
-                    val (payloadBytes, mime) = buildUsbReadyPayload(pages, monochrome, isLandscape)
-                    UsbPrinterHelper.sendPrintPayload(
-                        usbManager = usbManager,
-                        info = info,
-                        documentBytes = payloadBytes,
-                        mimeType = mime,
-                        jobName = displayName
-                    ) { status ->
+                    val (payloadBytes, mime) = buildPrintReadyPdf(pages, colorModeIdx, isLandscape)
+                    UsbPrinterHelper.sendPrintPayload(usbManager, info, payloadBytes, mime, displayName) { status ->
                         runOnUiThread { setLog(status) }
                     }
                 } catch (e: Exception) {
@@ -562,7 +588,7 @@ class MainActivity : AppCompatActivity() {
 
             result.onSuccess { msg ->
                 setLog(msg)
-                Toast.makeText(this@MainActivity, "Perintah cetak terkirim", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, "Data terkirim ke USB", Toast.LENGTH_SHORT).show()
             }.onFailure { err ->
                 setLog("Gagal USB Direct: ${err.message}")
                 Toast.makeText(this@MainActivity, "Gagal cetak USB langsung", Toast.LENGTH_LONG).show()
@@ -571,44 +597,37 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun buildUsbReadyPayload(
+    private fun buildPrintReadyPdf(
         pages: List<Int>,
-        monochrome: Boolean,
+        colorModeIdx: Int,
         isLandscape: Boolean
     ): Pair<ByteArray, String> {
-        // If sending full original color PDF without modifications, pass raw PDF bytes directly
-        val isFullUnmodifiedPdf = isPdfMode && !monochrome && pages.size == totalPages && etPageRange.text.isNullOrBlank()
-        if (isFullUnmodifiedPdf) {
+        val isUnmodifiedPdf = isPdfMode && colorModeIdx == 0 && pages.size == totalPages && etPageRange.text.isNullOrBlank()
+        if (isUnmodifiedPdf) {
             val raw = contentResolver.openInputStream(selectedUris[0])?.use { it.readBytes() }
                 ?: throw IllegalStateException("Gagal membaca PDF.")
             return Pair(raw, "application/pdf")
         }
 
-        // Otherwise build a clean print-ready PDF matching chosen paper, pages & monochrome filter
         val (baseW, baseH) = when (spPaperSize.selectedItemPosition) {
-            1 -> Pair(609, 935)   // F4 in 72pt units
-            2 -> Pair(612, 792)   // Letter
-            3 -> Pair(288, 432)   // 4R
-            else -> Pair(595, 842) // A4
+            1 -> Pair(609, 935)
+            2 -> Pair(612, 792)
+            3 -> Pair(288, 432)
+            else -> Pair(595, 842)
         }
         val pageW = if (isLandscape) baseH else baseW
         val pageH = if (isLandscape) baseW else baseH
 
         val pdf = PdfDocument()
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-        if (monochrome) {
-            paint.colorFilter = ColorMatrixColorFilter(ColorMatrix().apply { setSaturation(0f) })
-        }
+        val paint = DirectPrintAdapter.buildFilterPaint(colorModeIdx)
 
         try {
             if (isPdfMode) {
                 contentResolver.openFileDescriptor(selectedUris[0], "r")?.use { pfd ->
                     PdfRenderer(pfd).use { renderer ->
                         pages.forEachIndexed { idx, pNum ->
-                            val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, idx + 1).create()
-                            val outPage = pdf.startPage(pageInfo)
+                            val outPage = pdf.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, idx + 1).create())
                             outPage.canvas.drawColor(Color.WHITE)
-
                             renderer.openPage((pNum - 1).coerceIn(0, renderer.pageCount - 1)).use { src ->
                                 val bmpW = (src.width * 2).coerceIn(300, 1800)
                                 val bmpH = (src.height * 2).coerceIn(300, 2500)
@@ -625,10 +644,8 @@ class MainActivity : AppCompatActivity() {
             } else {
                 pages.forEachIndexed { idx, pNum ->
                     val uri = selectedUris.getOrNull(pNum - 1) ?: return@forEachIndexed
-                    val pageInfo = PdfDocument.PageInfo.Builder(pageW, pageH, idx + 1).create()
-                    val outPage = pdf.startPage(pageInfo)
+                    val outPage = pdf.startPage(PdfDocument.PageInfo.Builder(pageW, pageH, idx + 1).create())
                     outPage.canvas.drawColor(Color.WHITE)
-
                     val opts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
                     contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, opts) }
                     var sample = 1
@@ -659,9 +676,7 @@ class MainActivity : AppCompatActivity() {
         val scale = minOf(availW / bmp.width.toFloat(), availH / bmp.height.toFloat())
         val dw = bmp.width * scale
         val dh = bmp.height * scale
-        val left = (canvas.width - dw) / 2f
-        val top = (canvas.height - dh) / 2f
-        canvas.drawBitmap(bmp, null, android.graphics.RectF(left, top, left + dw, top + dh), paint)
+        canvas.drawBitmap(bmp, null, RectF((canvas.width - dw) / 2f, (canvas.height - dh) / 2f, (canvas.width + dw) / 2f, (canvas.height + dh) / 2f), paint)
     }
 
     private fun setLog(msg: String) {
